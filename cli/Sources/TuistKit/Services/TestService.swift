@@ -15,6 +15,7 @@ import TuistLogging
 import TuistRootDirectoryLocator
 import TuistServer
 import TuistSupport
+import TuistXcodeBuildProducts
 import TuistXCResultService
 import XcodeGraph
 

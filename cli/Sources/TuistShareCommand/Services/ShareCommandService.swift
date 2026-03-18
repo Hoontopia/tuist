@@ -20,6 +20,7 @@ import TuistSupport
     import TuistLoader
     import TuistSimulator
     import TuistUserInputReader
+    import TuistXcodeBuildProducts
     import XcodeGraph
 #endif
 
@@ -68,7 +69,7 @@ struct ShareCommandService {
 
     #if os(macOS)
         private let fileHandler: FileHandling
-        private let xcodeProjectBuildDirectoryLocator: XcodeProjectBuildDirectoryLocating
+        private let builtAppBundleLocator: BuiltAppBundleLocating
         private let buildGraphInspector: BuildGraphInspecting
         private let manifestLoader: ManifestLoading
         private let manifestGraphLoader: ManifestGraphLoading
@@ -142,7 +143,10 @@ struct ShareCommandService {
             self.fileArchiverFactory = fileArchiverFactory
             self.gitController = gitController
             self.fileHandler = fileHandler
-            self.xcodeProjectBuildDirectoryLocator = xcodeProjectBuildDirectoryLocator
+            self.builtAppBundleLocator = BuiltAppBundleLocator(
+                fileSystem: fileSystem,
+                xcodeProjectBuildDirectoryLocator: xcodeProjectBuildDirectoryLocator
+            )
             self.buildGraphInspector = buildGraphInspector
             self.manifestLoader = manifestLoader
             self.manifestGraphLoader = manifestGraphLoader
@@ -461,31 +465,17 @@ struct ShareCommandService {
         }
 
         private func copyAppBundle(
-            for destinationType: DestinationType,
+            _ builtAppBundle: BuiltAppBundle,
             app: String,
-            projectPath: AbsolutePath,
-            derivedDataPath: AbsolutePath?,
             configuration: String,
             temporaryPath: AbsolutePath
-        ) async throws -> AbsolutePath? {
-            let appPath = try await xcodeProjectBuildDirectoryLocator.locate(
-                destinationType: destinationType,
-                projectPath: projectPath,
-                derivedDataPath: derivedDataPath,
-                configuration: configuration
-            )
-            .appending(component: "\(app).app")
-
+        ) async throws -> AbsolutePath {
             let newAppPath = temporaryPath.appending(
                 component:
-                "\(destinationType.buildProductDestinationPathComponent(for: configuration))-\(app).app"
+                "\(builtAppBundle.destinationType.buildProductDestinationPathComponent(for: configuration))-\(app).app"
             )
 
-            if try await !fileSystem.exists(appPath) {
-                return nil
-            }
-
-            try await fileSystem.copy(appPath, to: newAppPath)
+            try await fileSystem.copy(builtAppBundle.path, to: newAppPath)
 
             return newAppPath
         }
@@ -503,37 +493,30 @@ struct ShareCommandService {
             track: String?
         ) async throws {
             try await fileHandler.inTemporaryDirectory { temporaryPath in
-                let appPaths =
-                    try await platforms
-                        .concurrentFlatMap { platform -> [DestinationType] in
-                            switch platform {
-                            case .iOS, .tvOS, .visionOS, .watchOS:
-                                return [
-                                    .simulator(platform),
-                                    .device(platform),
-                                ]
-                            case .macOS:
-                                return [.device(platform)]
-                            }
-                        }
-                        .concurrentCompactMap { destinationType in
-                            try await copyAppBundle(
-                                for: destinationType,
-                                app: app,
-                                projectPath: workspacePath,
-                                derivedDataPath: derivedDataPath,
-                                configuration: configuration,
-                                temporaryPath: temporaryPath
-                            )
-                        }
-                        .uniqued()
+                let builtAppBundles = try await builtAppBundleLocator.locateBuiltAppBundles(
+                    app: app,
+                    projectPath: workspacePath,
+                    derivedDataPath: derivedDataPath,
+                    configuration: configuration,
+                    platforms: platforms
+                )
+
+                if builtAppBundles.isEmpty {
+                    throw ShareCommandServiceError.noAppsFound(app: app, configuration: configuration)
+                }
+
+                let appPaths = try await builtAppBundles.concurrentMap {
+                    try await copyAppBundle(
+                        $0,
+                        app: app,
+                        configuration: configuration,
+                        temporaryPath: temporaryPath
+                    )
+                }
+                .uniqued()
 
                 let appBundles = try await appPaths.concurrentMap {
                     try await appBundleLoader.load($0)
-                }
-
-                if appPaths.isEmpty {
-                    throw ShareCommandServiceError.noAppsFound(app: app, configuration: configuration)
                 }
 
                 let preview = try await uploadApplePreviewType(

@@ -12,6 +12,7 @@ import TuistLoader
 import TuistSupport
 import TuistTesting
 import TuistUniqueIDGenerator
+import TuistXcodeBuildProducts
 import TuistXCActivityLog
 import XcodeGraph
 

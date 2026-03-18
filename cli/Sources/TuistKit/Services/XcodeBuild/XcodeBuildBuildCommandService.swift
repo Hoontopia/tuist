@@ -8,6 +8,7 @@ import TuistEnvironment
 import TuistLoader
 import TuistSupport
 import TuistUniqueIDGenerator
+import TuistXcodeBuildProducts
 import TuistXCActivityLog
 
 struct XcodeBuildBuildCommandService {

@@ -14,6 +14,7 @@ import TuistGit
 import TuistLoader
 import TuistServer
 import TuistSupport
+import TuistXcodeBuildProducts
 import TuistXCResultService
 import XcodeGraph
 import XCTest
