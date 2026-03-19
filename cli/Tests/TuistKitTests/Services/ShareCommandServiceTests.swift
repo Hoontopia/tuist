@@ -12,16 +12,14 @@ import TuistConfigLoader
 import TuistConstants
 import TuistCore
 import TuistGit
-import TuistLoader
+import TuistKit
 import TuistNooraTesting
 import TuistServer
 import TuistSupport
 import TuistTesting
-import TuistUserInputReader
 import TuistXcodeBuildProducts
 import XcodeGraph
 
-import TuistKit
 @testable import TuistShareCommand
 
 @Suite(.snapshots)
@@ -32,10 +30,7 @@ struct ShareCommandServiceTests {
     private let previewsUploadService: MockPreviewsUploadServicing
     private let configLoader: MockConfigLoading
     private let serverEnvironmentService: MockServerEnvironmentServicing
-    private let manifestLoader: MockManifestLoading
-    private let manifestGraphLoader: MockManifestGraphLoading
-    private let userInputReader: MockUserInputReading
-    private let defaultConfigurationFetcher: MockDefaultConfigurationFetching
+    private let appBundlePathResolver: MockAppBundlePathResolving
     private let appBundleLoader: MockAppBundleLoading
     private let fileUnarchiver: MockFileUnarchiving
     private let fileArchiverFactory: MockFileArchivingFactorying
@@ -50,10 +45,7 @@ struct ShareCommandServiceTests {
         previewsUploadService = .init()
         configLoader = .init()
         serverEnvironmentService = .init()
-        manifestLoader = .init()
-        manifestGraphLoader = .init()
-        userInputReader = .init()
-        defaultConfigurationFetcher = .init()
+        appBundlePathResolver = .init()
         appBundleLoader = .init()
         fileUnarchiver = .init()
         fileArchiverFactory = MockFileArchivingFactorying()
@@ -79,20 +71,13 @@ struct ShareCommandServiceTests {
             fileHandler: FileHandler.shared,
             xcodeProjectBuildDirectoryLocator: xcodeProjectBuildDirectoryLocator,
             buildGraphInspector: buildGraphInspector,
-            manifestLoader: manifestLoader,
-            manifestGraphLoader: manifestGraphLoader,
-            userInputReader: userInputReader,
-            defaultConfigurationFetcher: defaultConfigurationFetcher,
+            appBundlePathResolver: appBundlePathResolver,
             appBundleLoader: appBundleLoader
         )
 
         given(configLoader)
             .loadConfig(path: .any)
             .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        given(manifestLoader)
-            .hasRootManifest(at: .any)
-            .willReturn(true)
 
         given(serverEnvironmentService)
             .url(configServerURL: .any)
@@ -110,8 +95,6 @@ struct ShareCommandServiceTests {
                 updateProgress: .any
             )
             .willReturn(.test(url: shareURL))
-
-        Matcher.register([GraphTarget].self)
     }
 
     @Test func share_tuist_project_when_multiple_apps_specified() async throws {
@@ -140,57 +123,23 @@ struct ShareCommandServiceTests {
     func share_tuist_project() async throws {
         // Given
         let projectPath = try #require(FileSystem.temporaryTestDirectory)
+        let workspacePath = projectPath.appending(component: "App.xcworkspace")
 
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        let appTarget: Target = .test(
-            name: "AppTarget",
-            destinations: [.appleVision, .iPhone],
-            productName: "App"
-        )
-        let appTargetTwo: Target = .test(name: "AppTwo")
-        let project: Project = .test(
-            targets: [
-                appTarget,
-                appTargetTwo,
-            ]
-        )
-        let graphAppTarget = GraphTarget(path: projectPath, target: appTarget, project: project)
-        let graphAppTargetTwo = GraphTarget(
-            path: projectPath, target: appTargetTwo, project: project
-        )
-
-        given(manifestGraphLoader)
-            .load(path: .any, disableSandbox: .any)
-            .willReturn(
-                (
-                    .test(
-                        projects: [
-                            projectPath: project,
-                        ]
-                    ),
-                    [],
-                    MapperEnvironment(),
-                    []
-                )
+        given(appBundlePathResolver)
+            .resolve(
+                app: .any,
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
             )
-
-        given(userInputReader)
-            .readValue(
-                asking: .any,
-                values: .value([
-                    graphAppTarget,
-                    graphAppTargetTwo,
-                ]),
-                valueDescription: .any
-            )
-            .willReturn(graphAppTarget)
-
-        given(defaultConfigurationFetcher)
-            .fetch(configuration: .any, defaultConfiguration: .any, graph: .any)
-            .willReturn("Debug")
+            .willReturn(ResolvedAppBundleTarget(
+                app: "App",
+                workspacePath: workspacePath,
+                configuration: "Debug",
+                platforms: [.iOS, .visionOS],
+                derivedDataPath: nil
+            ))
 
         let iosPath = projectPath.appending(component: "ios-simulator")
         let iosDevicePath = projectPath.appending(component: "iphoneos")
@@ -275,51 +224,23 @@ struct ShareCommandServiceTests {
     func share_tuist_project_when_no_app_found() async throws {
         // Given
         let projectPath = try #require(FileSystem.temporaryTestDirectory)
+        let workspacePath = projectPath.appending(component: "App.xcworkspace")
 
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        let appTarget: Target = .test(
-            name: "AppTarget",
-            destinations: [.iPhone],
-            productName: "App"
-        )
-        let project: Project = .test(
-            targets: [
-                appTarget,
-            ]
-        )
-        let graphAppTarget = GraphTarget(path: projectPath, target: appTarget, project: project)
-
-        given(manifestGraphLoader)
-            .load(path: .any, disableSandbox: .any)
-            .willReturn(
-                (
-                    .test(
-                        projects: [
-                            projectPath: project,
-                        ]
-                    ),
-                    [],
-                    MapperEnvironment(),
-                    []
-                )
+        given(appBundlePathResolver)
+            .resolve(
+                app: .any,
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
             )
-
-        given(userInputReader)
-            .readValue(
-                asking: .any,
-                values: .value([
-                    graphAppTarget,
-                ]),
-                valueDescription: .any
-            )
-            .willReturn(graphAppTarget)
-
-        given(defaultConfigurationFetcher)
-            .fetch(configuration: .any, defaultConfiguration: .any, graph: .any)
-            .willReturn("Debug")
+            .willReturn(ResolvedAppBundleTarget(
+                app: "App",
+                workspacePath: workspacePath,
+                configuration: "Debug",
+                platforms: [.iOS],
+                derivedDataPath: nil
+            ))
 
         let iosPath = projectPath.appending(component: "ios-simulator")
         let iosDevicePath = projectPath.appending(component: "iphoneos")
@@ -349,7 +270,7 @@ struct ShareCommandServiceTests {
 
         // When / Then
         await #expect(
-            throws: ShareCommandServiceError.noAppsFound(app: "App", configuration: "Debug")
+            throws: AppBundlePathResolverError.noAppsFound(app: "App", configuration: "Debug")
         ) {
             try await subject.run(
                 path: nil,
@@ -367,54 +288,23 @@ struct ShareCommandServiceTests {
     func share_tuist_project_with_a_specified_app() async throws {
         // Given
         let projectPath = try #require(FileSystem.temporaryTestDirectory)
+        let workspacePath = projectPath.appending(component: "App.xcworkspace")
 
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        let appTarget: Target = .test(
-            name: "App",
-            destinations: [.appleVision, .iPhone]
-        )
-        let appTargetTwo: Target = .test(name: "AppTwo")
-        let project: Project = .test(
-            targets: [
-                appTarget,
-                appTargetTwo,
-            ]
-        )
-        let graphAppTargetTwo = GraphTarget(
-            path: projectPath, target: appTargetTwo, project: project
-        )
-
-        given(manifestGraphLoader)
-            .load(path: .any, disableSandbox: .any)
-            .willReturn(
-                (
-                    .test(
-                        projects: [
-                            projectPath: project,
-                        ]
-                    ),
-                    [],
-                    MapperEnvironment(),
-                    []
-                )
+        given(appBundlePathResolver)
+            .resolve(
+                app: .value("AppTwo"),
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
             )
-
-        given(userInputReader)
-            .readValue(
-                asking: .any,
-                values: .value([
-                    graphAppTargetTwo,
-                ]),
-                valueDescription: .any
-            )
-            .willReturn(graphAppTargetTwo)
-
-        given(defaultConfigurationFetcher)
-            .fetch(configuration: .any, defaultConfiguration: .any, graph: .any)
-            .willReturn("Debug")
+            .willReturn(ResolvedAppBundleTarget(
+                app: "AppTwo",
+                workspacePath: workspacePath,
+                configuration: "Debug",
+                platforms: [.iOS],
+                derivedDataPath: nil
+            ))
 
         let iosPath = projectPath.appending(component: "ios-simulator")
         let iosDevicePath = projectPath.appending(component: "iphoneos")
@@ -483,47 +373,27 @@ struct ShareCommandServiceTests {
     func share_tuist_project_with_a_specified_app_and_json_flag() async throws {
         // Given
         let projectPath = try #require(FileSystem.temporaryTestDirectory)
+        let workspacePath = projectPath.appending(component: "App.xcworkspace")
 
-        let appTarget: Target = .test(
-            name: "App"
-        )
-        let project: Project = .test(
-            targets: [
-                appTarget,
-            ]
-        )
-        let graphAppTarget = GraphTarget(path: projectPath, target: appTarget, project: project)
+        given(appBundlePathResolver)
+            .resolve(
+                app: .any,
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
+            )
+            .willReturn(ResolvedAppBundleTarget(
+                app: "App",
+                workspacePath: workspacePath,
+                configuration: "Debug",
+                platforms: [.iOS],
+                derivedDataPath: nil
+            ))
 
         given(appBundleLoader)
             .load(.any)
             .willReturn(.test())
-
-        given(manifestGraphLoader)
-            .load(path: .any, disableSandbox: .any)
-            .willReturn(
-                (
-                    .test(
-                        projects: [
-                            projectPath: project,
-                        ]
-                    ),
-                    [],
-                    MapperEnvironment(),
-                    []
-                )
-            )
-
-        given(userInputReader)
-            .readValue(
-                asking: .any,
-                values: .any,
-                valueDescription: .any
-            )
-            .willReturn(graphAppTarget)
-
-        given(defaultConfigurationFetcher)
-            .fetch(configuration: .any, defaultConfiguration: .any, graph: .any)
-            .willReturn("Debug")
 
         let iosPath = projectPath.appending(component: "ios-simulator")
         let iosDevicePath = projectPath.appending(component: "iphoneos")
@@ -567,52 +437,23 @@ struct ShareCommandServiceTests {
     func share_tuist_project_with_a_specified_appclip() async throws {
         // Given
         let projectPath = try #require(FileSystem.temporaryTestDirectory)
+        let workspacePath = projectPath.appending(component: "App.xcworkspace")
 
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        let appClipTarget: Target = .test(
-            name: "AppClip",
-            product: .appClip
-        )
-        let appTarget: Target = .test(name: "App")
-        let project: Project = .test(
-            targets: [
-                appClipTarget,
-                appTarget,
-            ]
-        )
-        let graphAppClipTarget = GraphTarget(
-            path: projectPath, target: appClipTarget, project: project
-        )
-
-        given(manifestGraphLoader)
-            .load(path: .any, disableSandbox: .any)
-            .willReturn(
-                (
-                    .test(
-                        projects: [
-                            projectPath: project,
-                        ]
-                    ),
-                    [],
-                    MapperEnvironment(),
-                    []
-                )
+        given(appBundlePathResolver)
+            .resolve(
+                app: .value("AppClip"),
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
             )
-
-        given(userInputReader)
-            .readValue(
-                asking: .any,
-                values: .any,
-                valueDescription: .any
-            )
-            .willReturn(graphAppClipTarget)
-
-        given(defaultConfigurationFetcher)
-            .fetch(configuration: .any, defaultConfiguration: .any, graph: .any)
-            .willReturn("Debug")
+            .willReturn(ResolvedAppBundleTarget(
+                app: "AppClip",
+                workspacePath: workspacePath,
+                configuration: "Debug",
+                platforms: [.iOS],
+                derivedDataPath: nil
+            ))
 
         let iosPath = projectPath.appending(component: "ios-simulator")
         let iosDevicePath = projectPath.appending(component: "iphoneos")
@@ -658,19 +499,19 @@ struct ShareCommandServiceTests {
 
     @Test func share_xcode_app_when_no_app_specified() async throws {
         // Given
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        manifestLoader.reset()
-
-        given(manifestLoader)
-            .hasRootManifest(at: .any)
-            .willReturn(false)
+        given(appBundlePathResolver)
+            .resolve(
+                app: .value(nil),
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
+            )
+            .willThrow(AppBundlePathResolverError.appNotSpecified)
 
         // When / Then
         await #expect(
-            throws: ShareCommandServiceError.appNotSpecified
+            throws: AppBundlePathResolverError.appNotSpecified
         ) {
             try await subject.run(
                 path: nil,
@@ -690,12 +531,6 @@ struct ShareCommandServiceTests {
             .loadConfig(path: .any)
             .willReturn(.test(fullHandle: "tuist/tuist"))
 
-        manifestLoader.reset()
-
-        given(manifestLoader)
-            .hasRootManifest(at: .any)
-            .willReturn(false)
-
         // When / Then
         await #expect(
             throws: ShareCommandServiceError.multipleAppsSpecified(["AppOne", "AppTwo"])
@@ -714,19 +549,19 @@ struct ShareCommandServiceTests {
 
     @Test func share_xcode_app_when_no_platforms_specified() async throws {
         // Given
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        manifestLoader.reset()
-
-        given(manifestLoader)
-            .hasRootManifest(at: .any)
-            .willReturn(false)
+        given(appBundlePathResolver)
+            .resolve(
+                app: .value("App"),
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
+            )
+            .willThrow(AppBundlePathResolverError.platformsNotSpecified)
 
         // When / Then
         await #expect(
-            throws: ShareCommandServiceError.platformsNotSpecified
+            throws: AppBundlePathResolverError.platformsNotSpecified
         ) {
             try await subject.run(
                 path: nil,
@@ -745,19 +580,19 @@ struct ShareCommandServiceTests {
         // Given
         let path = try #require(FileSystem.temporaryTestDirectory)
 
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        manifestLoader.reset()
-
-        given(manifestLoader)
-            .hasRootManifest(at: .any)
-            .willReturn(false)
+        given(appBundlePathResolver)
+            .resolve(
+                app: .value("App"),
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
+            )
+            .willThrow(AppBundlePathResolverError.projectOrWorkspaceNotFound(path: path.pathString))
 
         // When / Then
         await #expect(
-            throws: ShareCommandServiceError.projectOrWorkspaceNotFound(path: path.pathString)
+            throws: AppBundlePathResolverError.projectOrWorkspaceNotFound(path: path.pathString)
         ) {
             try await subject.run(
                 path: path.pathString,
@@ -775,19 +610,23 @@ struct ShareCommandServiceTests {
     func share_xcode_app() async throws {
         // Given
         let path = try #require(FileSystem.temporaryTestDirectory)
-
-        given(configLoader)
-            .loadConfig(path: .any)
-            .willReturn(.test(fullHandle: "tuist/tuist"))
-
-        manifestLoader.reset()
-
-        given(manifestLoader)
-            .hasRootManifest(at: .any)
-            .willReturn(false)
-
         let xcodeprojPath = path.appending(component: "App.xcodeproj")
-        try await fileSystem.makeDirectory(at: xcodeprojPath)
+
+        given(appBundlePathResolver)
+            .resolve(
+                app: .value("App"),
+                path: .any,
+                configuration: .any,
+                platforms: .any,
+                derivedDataPath: .any
+            )
+            .willReturn(ResolvedAppBundleTarget(
+                app: "App",
+                workspacePath: xcodeprojPath,
+                configuration: "Debug",
+                platforms: [.iOS],
+                derivedDataPath: nil
+            ))
 
         let iosPath = path.appending(component: "ios-simulator")
         let iosDevicePath = path.appending(component: "iphoneos")

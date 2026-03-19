@@ -17,9 +17,7 @@ import TuistSupport
     import TuistAutomation
     import TuistCore
     import TuistKit
-    import TuistLoader
     import TuistSimulator
-    import TuistUserInputReader
     import TuistXcodeBuildProducts
     import XcodeGraph
 #endif
@@ -28,10 +26,7 @@ enum ShareCommandServiceError: Equatable, LocalizedError {
     case fullHandleNotFound
     case multipleAppsSpecified([String])
     #if os(macOS)
-        case projectOrWorkspaceNotFound(path: String)
-        case noAppsFound(app: String, configuration: String)
         case appNotSpecified
-        case platformsNotSpecified
     #endif
     case appleBuildsSharingNotSupportedOnLinux
 
@@ -42,14 +37,8 @@ enum ShareCommandServiceError: Equatable, LocalizedError {
         case let .multipleAppsSpecified(apps):
             return "You specified multiple apps to share: \(apps.joined(separator: " ")). You cannot specify multiple apps when using `tuist share`."
         #if os(macOS)
-            case let .projectOrWorkspaceNotFound(path):
-                return "Workspace or project not found at \(path)"
-            case let .noAppsFound(app: app, configuration: configuration):
-                return "\(app) was not found in Xcode build products for the \(configuration) configuration. Build the app first or pass an explicit bundle path."
             case .appNotSpecified:
                 return "If you're not using Tuist projects, you must specify the app name when sharing an app, such as `tuist share App --platforms ios`."
-            case .platformsNotSpecified:
-                return "If you're not using Tuist projects, you must specify the platforms when sharing an app, such as `tuist share App --platforms ios`."
         #endif
         case .appleBuildsSharingNotSupportedOnLinux:
             return "Sharing Apple app bundles and IPAs is only supported on macOS. On Linux, only APK files can be shared."
@@ -71,22 +60,12 @@ struct ShareCommandService {
         private let fileHandler: FileHandling
         private let builtAppBundleLocator: BuiltAppBundleLocating
         private let buildGraphInspector: BuildGraphInspecting
-        private let manifestLoader: ManifestLoading
-        private let manifestGraphLoader: ManifestGraphLoading
-        private let userInputReader: UserInputReading
-        private let defaultConfigurationFetcher: DefaultConfigurationFetching
+        private let appBundlePathResolver: AppBundlePathResolving
         private let appBundleLoader: AppBundleLoading
     #endif
 
     init() {
         #if os(macOS)
-            let manifestLoader = ManifestLoader.current
-            let manifestGraphLoader = ManifestGraphLoader(
-                manifestLoader: manifestLoader,
-                workspaceMapper: SequentialWorkspaceMapper(mappers: []),
-                graphMapper: SequentialGraphMapper([])
-            )
-
             self.init(
                 fileSystem: FileSystem(),
                 configLoader: ConfigLoader(),
@@ -98,10 +77,7 @@ struct ShareCommandService {
                 fileHandler: FileHandler.shared,
                 xcodeProjectBuildDirectoryLocator: XcodeProjectBuildDirectoryLocator(),
                 buildGraphInspector: BuildGraphInspector(),
-                manifestLoader: manifestLoader,
-                manifestGraphLoader: manifestGraphLoader,
-                userInputReader: UserInputReader(),
-                defaultConfigurationFetcher: DefaultConfigurationFetcher(),
+                appBundlePathResolver: AppBundlePathResolver(),
                 appBundleLoader: AppBundleLoader()
             )
         #else
@@ -129,10 +105,7 @@ struct ShareCommandService {
             fileHandler: FileHandling,
             xcodeProjectBuildDirectoryLocator: XcodeProjectBuildDirectoryLocating,
             buildGraphInspector: BuildGraphInspecting,
-            manifestLoader: ManifestLoading,
-            manifestGraphLoader: ManifestGraphLoading,
-            userInputReader: UserInputReading,
-            defaultConfigurationFetcher: DefaultConfigurationFetching,
+            appBundlePathResolver: AppBundlePathResolving,
             appBundleLoader: AppBundleLoading
         ) {
             self.fileSystem = fileSystem
@@ -148,10 +121,7 @@ struct ShareCommandService {
                 xcodeProjectBuildDirectoryLocator: xcodeProjectBuildDirectoryLocator
             )
             self.buildGraphInspector = buildGraphInspector
-            self.manifestLoader = manifestLoader
-            self.manifestGraphLoader = manifestGraphLoader
-            self.userInputReader = userInputReader
-            self.defaultConfigurationFetcher = defaultConfigurationFetcher
+            self.appBundlePathResolver = appBundlePathResolver
             self.appBundleLoader = appBundleLoader
         }
     #else
@@ -235,79 +205,23 @@ struct ShareCommandService {
                     json: json,
                     track: track
                 )
-            } else if try await manifestLoader.hasRootManifest(at: path) {
+            } else {
                 guard apps.count < 2 else { throw ShareCommandServiceError.multipleAppsSpecified(apps) }
 
-                let (graph, _, _, _) = try await manifestGraphLoader.load(
+                let resolved = try await appBundlePathResolver.resolve(
+                    app: apps.first,
                     path: path,
-                    disableSandbox: config.project.disableSandbox
-                )
-                let graphTraverser = GraphTraverser(graph: graph)
-                let shareableTargets =
-                    graphTraverser
-                        .targets(product: .app)
-                        .union(graphTraverser.targets(product: .appClip))
-                        .union(graphTraverser.targets(product: .watch2App))
-                        .map { $0 }
-                        .filter {
-                            if let app = apps.first {
-                                return $0.target.name == app
-                            } else {
-                                return true
-                            }
-                        }
-                let appTarget: GraphTarget = try userInputReader.readValue(
-                    asking: "Select the app that you want to share:",
-                    values: shareableTargets.sorted(by: { $0.target.name < $1.target.name }),
-                    valueDescription: \.target.name
-                )
-
-                let configuration = try defaultConfigurationFetcher.fetch(
                     configuration: configuration,
-                    defaultConfiguration: config.project.generatedProject?.generationOptions
-                        .defaultConfiguration,
-                    graph: graph
+                    platforms: platforms,
+                    derivedDataPath: derivedDataPath
                 )
-
-                let platforms =
-                    platforms.isEmpty ? appTarget.target.supportedPlatforms.map { $0 } : platforms
 
                 try await uploadApplePreview(
-                    for: platforms,
-                    workspacePath: graph.workspace.xcWorkspacePath,
-                    configuration: configuration,
-                    app: appTarget.target.productName,
-                    derivedDataPath: derivedDataPath,
-                    path: path,
-                    fullHandle: fullHandle,
-                    serverURL: serverURL,
-                    json: json,
-                    track: track
-                )
-            } else {
-                guard !apps.isEmpty else { throw ShareCommandServiceError.appNotSpecified }
-                guard apps.count == 1, let app = apps.first else {
-                    throw ShareCommandServiceError.multipleAppsSpecified(apps)
-                }
-                guard !platforms.isEmpty else { throw ShareCommandServiceError.platformsNotSpecified }
-
-                let configuration = configuration ?? BuildConfiguration.debug.name
-
-                let workspace = try await fileSystem.glob(directory: path, include: ["*.xcworkspace"])
-                    .collect().first
-                let project = try await fileSystem.glob(directory: path, include: ["*.xcodeproj"])
-                    .collect().first
-                guard let workspaceOrProjectPath = workspace ?? project
-                else {
-                    throw ShareCommandServiceError.projectOrWorkspaceNotFound(path: path.pathString)
-                }
-
-                try await uploadApplePreview(
-                    for: platforms,
-                    workspacePath: workspaceOrProjectPath,
-                    configuration: configuration,
-                    app: app,
-                    derivedDataPath: derivedDataPath,
+                    for: resolved.platforms,
+                    workspacePath: resolved.workspacePath,
+                    configuration: resolved.configuration,
+                    app: resolved.app,
+                    derivedDataPath: resolved.derivedDataPath,
                     path: path,
                     fullHandle: fullHandle,
                     serverURL: serverURL,
@@ -502,7 +416,7 @@ struct ShareCommandService {
                 )
 
                 if builtAppBundles.isEmpty {
-                    throw ShareCommandServiceError.noAppsFound(app: app, configuration: configuration)
+                    throw AppBundlePathResolverError.noAppsFound(app: app, configuration: configuration)
                 }
 
                 let appPaths = try await builtAppBundles.concurrentMap {
