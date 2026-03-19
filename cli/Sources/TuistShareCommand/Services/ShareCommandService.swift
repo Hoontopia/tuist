@@ -116,7 +116,7 @@ struct ShareCommandService {
             self.fileArchiverFactory = fileArchiverFactory
             self.gitController = gitController
             self.fileHandler = fileHandler
-            self.builtAppBundleLocator = BuiltAppBundleLocator(
+            builtAppBundleLocator = BuiltAppBundleLocator(
                 fileSystem: fileSystem,
                 xcodeProjectBuildDirectoryLocator: xcodeProjectBuildDirectoryLocator
             )

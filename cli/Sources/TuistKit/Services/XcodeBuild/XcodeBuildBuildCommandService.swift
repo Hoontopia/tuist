@@ -8,8 +8,8 @@ import TuistEnvironment
 import TuistLoader
 import TuistSupport
 import TuistUniqueIDGenerator
-import TuistXcodeBuildProducts
 import TuistXCActivityLog
+import TuistXcodeBuildProducts
 
 struct XcodeBuildBuildCommandService {
     private let fileSystem: FileSysteming

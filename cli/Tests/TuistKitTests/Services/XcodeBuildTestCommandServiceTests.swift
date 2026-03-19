@@ -12,8 +12,8 @@ import TuistLoader
 import TuistSupport
 import TuistTesting
 import TuistUniqueIDGenerator
-import TuistXcodeBuildProducts
 import TuistXCActivityLog
+import TuistXcodeBuildProducts
 import XcodeGraph
 
 import protocol XcodeGraphMapper.XcodeGraphMapping
