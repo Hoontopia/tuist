@@ -258,10 +258,14 @@ msgstr ""
 msgid "Server error"
 msgstr ""
 
-#: lib/tuist_web/components/app_layout_components.ex:331
 #: lib/tuist_web/components/layouts/account.html.heex:69
 #, elixir-autogen, elixir-format
 msgid "Settings"
+msgstr ""
+
+#: lib/tuist_web/components/app_layout_components.ex:331
+#, elixir-autogen, elixir-format
+msgid "Project Settings"
 msgstr ""
 
 #: lib/tuist_web/controllers/error_html.ex:101
