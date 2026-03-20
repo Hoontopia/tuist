@@ -2306,7 +2306,7 @@ msgstr ""
 
 #: lib/tuist_web/marketing/controllers/marketing_html/home.html.heex:380
 #, elixir-autogen, elixir-format
-msgid "From code to feedback in minutes. Instant previews and AI-powered testing close the loop between building and validating."
+msgid "Instantly generate and share app previews so your team can test changes and give feedback faster."
 msgstr ""
 
 #: lib/tuist_web/marketing/controllers/marketing_html/home.html.heex:286
