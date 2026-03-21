@@ -1018,7 +1018,7 @@ extension ProjectDescription.ResourceFileElements {
                 } else {
                     return handleCopyResource(resourceAbsolutePath: resourceAbsolutePath)
                 }
-            case .process:
+            case .process, .embedInCode:
                 return try await handleProcessResource(resourceAbsolutePath: resourceAbsolutePath)
             }
         }
