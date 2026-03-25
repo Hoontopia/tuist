@@ -3803,6 +3803,11 @@ components:
                       type: array
                       x-struct:
                       x-validate:
+                    is_quarantined:
+                      description: Whether this test case was quarantined when it ran.
+                      type: boolean
+                      x-struct:
+                      x-validate:
                     name:
                       description: The name of the test case.
                       type: string
@@ -3988,7 +3993,7 @@ components:
       description: A shard plan with assignment details.
       properties:
         id:
-          description: The shard plan UUID.
+          description: The shard plan id.
           format: uuid
           type: string
           x-struct:
@@ -5370,7 +5375,7 @@ info:
   version: 0.1.0
   x-logo:
     altText: Tuist logo
-    url: http://localhost:8080/images/open-graph/squared.png
+    url: http://localhost:8296/images/open-graph/squared.png
 openapi: 3.0.0
 paths:
   /api/cache/multipart/complete:
@@ -7457,6 +7462,14 @@ paths:
             type: integer
             x-struct:
             x-validate:
+        - description: Filter bundles by git branch.
+          in: query
+          name: git_branch
+          required: false
+          schema:
+            type: string
+            x-struct:
+            x-validate:
         - description: The handle of the account.
           in: path
           name: account_handle
@@ -7471,14 +7484,6 @@ paths:
           required: false
           schema:
             type: integer
-            x-struct:
-            x-validate:
-        - description: Filter bundles by git branch.
-          in: query
-          name: git_branch
-          required: false
-          schema:
-            type: string
             x-struct:
             x-validate:
         - description: The handle of the project.
@@ -8155,6 +8160,16 @@ paths:
                     type: string
                     x-struct:
                     x-validate:
+                  selective_testing_local_hits:
+                    description: Number of test targets skipped due to local selective testing cache hit.
+                    type: integer
+                    x-struct:
+                    x-validate:
+                  selective_testing_remote_hits:
+                    description: Number of test targets skipped due to remote selective testing cache hit.
+                    type: integer
+                    x-struct:
+                    x-validate:
                   status:
                     description: Run status.
                     enum:
@@ -8166,6 +8181,11 @@ paths:
                     x-validate:
                   total_test_count:
                     description: Total number of test cases.
+                    type: integer
+                    x-struct:
+                    x-validate:
+                  xcode_selective_testing_targets:
+                    description: Total number of Xcode test targets eligible for selective testing.
                     type: integer
                     x-struct:
                     x-validate:
@@ -8185,6 +8205,9 @@ paths:
                   - failed_test_count
                   - flaky_test_count
                   - avg_test_duration
+                  - xcode_selective_testing_targets
+                  - selective_testing_local_hits
+                  - selective_testing_remote_hits
                 type: object
                 x-struct:
                 x-validate:
@@ -17966,6 +17989,16 @@ paths:
                           type: string
                           x-struct:
                           x-validate:
+                        selective_testing_local_hits:
+                          description: Number of test targets skipped due to local selective testing cache hit.
+                          type: integer
+                          x-struct:
+                          x-validate:
+                        selective_testing_remote_hits:
+                          description: Number of test targets skipped due to remote selective testing cache hit.
+                          type: integer
+                          x-struct:
+                          x-validate:
                         skipped_tests:
                           description: Number of skipped test cases.
                           type: integer
@@ -17982,6 +18015,11 @@ paths:
                           x-validate:
                         total_test_count:
                           description: Total number of test cases.
+                          type: integer
+                          x-struct:
+                          x-validate:
+                        xcode_selective_testing_targets:
+                          description: Total number of Xcode test targets eligible for selective testing.
                           type: integer
                           x-struct:
                           x-validate:
@@ -18217,6 +18255,11 @@ paths:
                               type: array
                               x-struct:
                               x-validate:
+                            is_quarantined:
+                              description: Whether this test case was quarantined when it ran.
+                              type: boolean
+                              x-struct:
+                              x-validate:
                             name:
                               description: The name of the test case.
                               type: string
@@ -18271,11 +18314,6 @@ paths:
                             test_suite_name:
                               description: The name of the test suite this test case belongs to (optional).
                               type: string
-                              x-struct:
-                              x-validate:
-                            is_quarantined:
-                              description: Whether this test case was quarantined when it ran.
-                              type: boolean
                               x-struct:
                               x-validate:
                           required:
@@ -18613,7 +18651,5 @@ paths:
 security:
   - authorization: []
   - cookie: []
-servers:
-  - url: http://localhost:8080
-    variables: {}
+servers: []
 tags: []
