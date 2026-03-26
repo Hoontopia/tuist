@@ -16,6 +16,10 @@ defmodule Tuist do
       Marketing.Blog,
       Marketing.Content,
       Marketing.Pages,
+      Docs,
+      Docs.Page,
+      Docs.Paths,
+      Docs.Sidebar,
       Marketing.Changelog,
       Marketing.OpenGraph,
       Marketing.Newsletter,
@@ -52,6 +56,12 @@ defmodule Tuist do
       Tests.Test,
       Tests.TestCase,
       Tests.Analytics,
+      Shards,
+      Shards.Analytics,
+      Shards.ShardPlan,
+      Shards.ShardPlanModule,
+      Shards.ShardPlanTestSuite,
+      Shards.ShardRun,
       MCP.Server,
       # App
       # -----

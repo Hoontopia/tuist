@@ -2,7 +2,9 @@ defmodule Tuist.TestsTest do
   use TuistTestSupport.Cases.DataCase
   use Mimic
 
+  alias Tuist.ClickHouseRepo
   alias Tuist.IngestRepo
+  alias Tuist.Shards.ShardRun
   alias Tuist.Tests
   alias Tuist.Tests.TestCase
   alias Tuist.Tests.TestCaseEvent
@@ -10,6 +12,7 @@ defmodule Tuist.TestsTest do
   alias TuistTestSupport.Fixtures.AccountsFixtures
   alias TuistTestSupport.Fixtures.ProjectsFixtures
   alias TuistTestSupport.Fixtures.RunsFixtures
+  alias TuistTestSupport.Fixtures.ShardsFixtures
 
   describe "get_test_case_run_by_id/2" do
     test "returns test case run when it exists" do
@@ -382,6 +385,99 @@ defmodule Tuist.TestsTest do
       # Then
       assert tests == []
       assert meta.total_count == 0
+    end
+  end
+
+  describe "list_sharded_test_runs/1" do
+    test "lists only sharded test runs" do
+      project = ProjectsFixtures.project_fixture()
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id)
+
+      {:ok, _non_sharded} =
+        RunsFixtures.test_fixture(project_id: project.id)
+
+      {:ok, sharded} =
+        RunsFixtures.test_fixture(
+          project_id: project.id,
+          shard_plan_id: plan.id,
+          shard_index: 0
+        )
+
+      {tests, _meta} =
+        Tests.list_sharded_test_runs(%{
+          filters: [
+            %{field: :project_id, op: :==, value: project.id}
+          ]
+        })
+
+      assert length(tests) == 1
+      assert hd(tests).id == sharded.id
+    end
+
+    test "filters sharded test runs by status" do
+      project = ProjectsFixtures.project_fixture()
+      plan1 = ShardsFixtures.shard_plan_fixture(project_id: project.id)
+      plan2 = ShardsFixtures.shard_plan_fixture(project_id: project.id)
+
+      {:ok, _success} =
+        RunsFixtures.test_fixture(
+          project_id: project.id,
+          shard_plan_id: plan1.id,
+          shard_index: 0,
+          status: "success"
+        )
+
+      {:ok, in_progress} =
+        RunsFixtures.test_fixture(
+          project_id: project.id,
+          shard_plan_id: plan2.id,
+          shard_index: 0,
+          status: "in_progress"
+        )
+
+      {tests, _meta} =
+        Tests.list_sharded_test_runs(%{
+          filters: [
+            %{field: :project_id, op: :==, value: project.id},
+            %{field: :status, op: :==, value: "in_progress"}
+          ]
+        })
+
+      assert Enum.any?(tests, fn t -> t.id == in_progress.id end)
+      refute Enum.any?(tests, fn t -> t.status == "success" end)
+    end
+
+    test "searches sharded test runs by scheme" do
+      project = ProjectsFixtures.project_fixture()
+      plan1 = ShardsFixtures.shard_plan_fixture(project_id: project.id)
+      plan2 = ShardsFixtures.shard_plan_fixture(project_id: project.id)
+
+      {:ok, app_test} =
+        RunsFixtures.test_fixture(
+          project_id: project.id,
+          shard_plan_id: plan1.id,
+          shard_index: 0,
+          scheme: "AppScheme"
+        )
+
+      {:ok, _other} =
+        RunsFixtures.test_fixture(
+          project_id: project.id,
+          shard_plan_id: plan2.id,
+          shard_index: 0,
+          scheme: "OtherScheme"
+        )
+
+      {tests, _meta} =
+        Tests.list_sharded_test_runs(%{
+          filters: [
+            %{field: :project_id, op: :==, value: project.id},
+            %{field: :scheme, op: :ilike_and, value: "App"}
+          ]
+        })
+
+      assert length(tests) == 1
+      assert hd(tests).id == app_test.id
     end
   end
 
@@ -1181,6 +1277,556 @@ defmodule Tuist.TestsTest do
       assert failure.path == "/path/to/test.swift"
       assert failure.line_number == 42
       assert failure.issue_type == "assertion"
+    end
+  end
+
+  describe "create_test/1 with sharding" do
+    test "first shard creates test with in_progress status" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0
+        })
+
+      assert test.status == "in_progress"
+      assert test.shard_plan_id == plan.id
+    end
+
+    test "second shard updates existing test and sets final status" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, first_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "success",
+              duration: 500,
+              test_cases: [
+                %{name: "testA", status: "success", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      assert first_test.status == "in_progress"
+
+      {:ok, updated_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 800,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 1,
+          test_modules: [
+            %{
+              name: "ModuleB",
+              status: "success",
+              duration: 800,
+              test_cases: [
+                %{name: "testB", status: "success", duration: 800}
+              ]
+            }
+          ]
+        })
+
+      assert updated_test.id == first_test.id
+      assert updated_test.status == "success"
+      assert updated_test.duration == 800
+    end
+
+    test "single shard plan sets status directly (not in_progress)" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 1)
+
+      {:ok, test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "success",
+              duration: 500,
+              test_cases: [
+                %{name: "testA", status: "success", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      assert test.status == "success"
+      assert test.shard_plan_id == plan.id
+    end
+
+    test "failure in first shard propagates to final status" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, _first_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "failure",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "failure",
+              duration: 500,
+              test_cases: [
+                %{name: "testA", status: "failure", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      {:ok, updated_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 800,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 1,
+          test_modules: [
+            %{
+              name: "ModuleB",
+              status: "success",
+              duration: 800,
+              test_cases: [
+                %{name: "testB", status: "success", duration: 800}
+              ]
+            }
+          ]
+        })
+
+      assert updated_test.status == "failure"
+    end
+
+    test "failure in second shard propagates to final status" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, _first_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "success",
+              duration: 500,
+              test_cases: [
+                %{name: "testA", status: "success", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      {:ok, updated_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 800,
+          status: "failure",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 1,
+          test_modules: [
+            %{
+              name: "ModuleB",
+              status: "failure",
+              duration: 800,
+              test_cases: [
+                %{name: "testB", status: "failure", duration: 800}
+              ]
+            }
+          ]
+        })
+
+      assert updated_test.status == "failure"
+    end
+
+    test "three shards all success" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 3)
+
+      {:ok, first_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 300,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "success",
+              duration: 300,
+              test_cases: [
+                %{name: "testA", status: "success", duration: 300}
+              ]
+            }
+          ]
+        })
+
+      assert first_test.status == "in_progress"
+
+      {:ok, second_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 400,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 1,
+          test_modules: [
+            %{
+              name: "ModuleB",
+              status: "success",
+              duration: 400,
+              test_cases: [
+                %{name: "testB", status: "success", duration: 400}
+              ]
+            }
+          ]
+        })
+
+      assert second_test.status == "in_progress"
+
+      {:ok, third_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 2,
+          test_modules: [
+            %{
+              name: "ModuleC",
+              status: "success",
+              duration: 500,
+              test_cases: [
+                %{name: "testC", status: "success", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      assert third_test.status == "success"
+    end
+
+    test "duration is max across shards" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, _first_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "success",
+              duration: 500,
+              test_cases: [
+                %{name: "testA", status: "success", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      {:ok, updated_test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 1000,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 1,
+          test_modules: [
+            %{
+              name: "ModuleB",
+              status: "success",
+              duration: 1000,
+              test_cases: [
+                %{name: "testB", status: "success", duration: 1000}
+              ]
+            }
+          ]
+        })
+
+      assert updated_test.duration == 1000
+    end
+
+    test "shard run is created for each shard" do
+      import Ecto.Query
+
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          model_identifier: "Mac15,6",
+          macos_version: "14.0",
+          xcode_version: "15.0",
+          git_branch: "main",
+          git_commit_sha: "abc123",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0,
+          test_modules: [
+            %{
+              name: "ModuleA",
+              status: "success",
+              duration: 500,
+              test_cases: [
+                %{name: "testA", status: "success", duration: 500}
+              ]
+            }
+          ]
+        })
+
+      shard_runs =
+        ClickHouseRepo.all(
+          from(sr in ShardRun,
+            where: sr.test_run_id == ^test.id
+          )
+        )
+
+      assert length(shard_runs) == 1
+      shard_run = hd(shard_runs)
+      assert shard_run.shard_index == 0
+      assert shard_run.status == "success"
+      assert shard_run.shard_plan_id == plan.id
+    end
+
+    test "first shard inherits build_run_id from shard plan" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      {:ok, build} = RunsFixtures.build_fixture(project_id: project.id, user_id: account.id)
+
+      plan =
+        ShardsFixtures.shard_plan_fixture(
+          project_id: project.id,
+          shard_count: 2,
+          build_run_id: build.id
+        )
+
+      {:ok, test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0
+        })
+
+      assert test.build_run_id == build.id
+    end
+
+    test "first shard inherits gradle_build_id from shard plan" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      gradle_build_id = Ecto.UUID.generate()
+
+      plan =
+        ShardsFixtures.shard_plan_fixture(
+          project_id: project.id,
+          shard_count: 2,
+          gradle_build_id: gradle_build_id
+        )
+
+      {:ok, test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          build_system: "gradle",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0
+        })
+
+      assert test.gradle_build_id == gradle_build_id
+    end
+
+    test "shard plan without build IDs creates test with nil build IDs" do
+      project = ProjectsFixtures.project_fixture()
+      account = AccountsFixtures.user_fixture(preload: [:account]).account
+      plan = ShardsFixtures.shard_plan_fixture(project_id: project.id, shard_count: 2)
+
+      {:ok, test} =
+        Tests.create_test(%{
+          id: UUIDv7.generate(),
+          project_id: project.id,
+          account_id: account.id,
+          duration: 500,
+          status: "success",
+          ran_at: NaiveDateTime.utc_now(),
+          is_ci: true,
+          shard_plan_id: plan.id,
+          shard_index: 0
+        })
+
+      assert is_nil(test.build_run_id)
+      assert is_nil(test.gradle_build_id)
     end
   end
 
@@ -2490,10 +3136,6 @@ defmodule Tuist.TestsTest do
           ]
         })
 
-      # Second test run should be marked as flaky (cross-run detection)
-      assert second_test.is_flaky == true
-
-      # Verify the ClickHouse record is also updated
       RunsFixtures.optimize_test_runs()
       {:ok, refetched_second_test} = Tests.get_test(second_test.id)
       assert refetched_second_test.is_flaky == true
@@ -4297,7 +4939,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       test_case_run =
-        Tuist.ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
+        ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
 
       result = Tests.get_flaky_run_group_for_test_case_run(test_case_run)
 
@@ -4344,7 +4986,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       test_case_run =
-        Tuist.ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
+        ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
 
       result = Tests.get_flaky_run_group_for_test_case_run(test_case_run)
 
@@ -4402,7 +5044,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       test_case_run =
-        Tuist.ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
+        ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
 
       result = Tests.get_flaky_run_group_for_test_case_run(test_case_run)
 
@@ -4456,7 +5098,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       test_case_run =
-        Tuist.ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
+        ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
 
       result = Tests.get_flaky_run_group_for_test_case_run(test_case_run)
 
@@ -4509,7 +5151,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       test_case_run =
-        Tuist.ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
+        ClickHouseRepo.one!(from(tcr in TestCaseRun, where: tcr.test_run_id == ^test_run.id))
 
       result = Tests.get_flaky_run_group_for_test_case_run(test_case_run)
 
@@ -4594,7 +5236,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       matching_tcr =
-        Tuist.ClickHouseRepo.one!(
+        ClickHouseRepo.one!(
           from(tcr in TestCaseRun,
             where: tcr.test_run_id == ^matching_run.id and tcr.is_flaky == true,
             limit: 1
@@ -4682,7 +5324,7 @@ defmodule Tuist.TestsTest do
       RunsFixtures.optimize_test_case_runs()
 
       test_case_run =
-        Tuist.ClickHouseRepo.one!(
+        ClickHouseRepo.one!(
           from(tcr in TestCaseRun,
             where: tcr.git_commit_sha == "abc123" and tcr.is_flaky == true,
             order_by: [desc: tcr.ran_at],
@@ -4867,7 +5509,7 @@ defmodule Tuist.TestsTest do
       assert fetched_test_case.is_flaky == false
     end
 
-    test "does not clear flaky flag for quarantined test cases" do
+    test "does not unquarantine when project has auto_quarantine_flaky_tests disabled" do
       project = ProjectsFixtures.project_fixture()
       test_case_id = Ecto.UUID.generate()
 
@@ -4884,8 +5526,34 @@ defmodule Tuist.TestsTest do
       {:ok, _count} = Tests.clear_stale_flaky_flags()
 
       {:ok, fetched_test_case} = Tests.get_test_case_by_id(test_case_id)
-      assert fetched_test_case.is_flaky == true
+      assert fetched_test_case.is_flaky == false
       assert fetched_test_case.is_quarantined == true
+    end
+
+    test "unquarantines when project has auto_quarantine_flaky_tests enabled" do
+      project = ProjectsFixtures.project_fixture()
+
+      project
+      |> Ecto.Changeset.change(auto_quarantine_flaky_tests: true)
+      |> Tuist.Repo.update!()
+
+      test_case_id = Ecto.UUID.generate()
+
+      test_case =
+        RunsFixtures.test_case_fixture(
+          id: test_case_id,
+          project_id: project.id,
+          is_flaky: true,
+          is_quarantined: true
+        )
+
+      IngestRepo.insert_all(TestCase, [test_case |> Map.from_struct() |> Map.delete(:__meta__)])
+
+      {:ok, _count} = Tests.clear_stale_flaky_flags()
+
+      {:ok, fetched_test_case} = Tests.get_test_case_by_id(test_case_id)
+      assert fetched_test_case.is_flaky == false
+      assert fetched_test_case.is_quarantined == false
     end
   end
 
@@ -6262,6 +6930,112 @@ defmodule Tuist.TestsTest do
 
       # Then
       assert count == before_count + 2
+    end
+  end
+
+  describe "expire_stale_in_progress_test_runs/0" do
+    test "marks stale in_progress test runs as failure" do
+      project = ProjectsFixtures.project_fixture()
+      seven_hours_ago = NaiveDateTime.add(NaiveDateTime.utc_now(), -7, :hour)
+
+      stale_id = UUIDv7.generate()
+
+      IngestRepo.insert_all(Tests.Test, [
+        %{
+          id: stale_id,
+          project_id: project.id,
+          account_id: project.account.id,
+          duration: 0,
+          status: "in_progress",
+          model_identifier: "",
+          macos_version: "",
+          xcode_version: "",
+          git_branch: "main",
+          git_commit_sha: "",
+          git_ref: "",
+          ran_at: seven_hours_ago,
+          is_ci: true,
+          is_flaky: false,
+          shard_plan_id: Ecto.UUID.generate(),
+          inserted_at: seven_hours_ago
+        }
+      ])
+
+      :ok = Tests.expire_stale_in_progress_test_runs()
+
+      [run] =
+        IngestRepo.all(from(t in Tests.Test, hints: ["FINAL"], where: t.id == ^stale_id))
+
+      assert run.status == "failure"
+    end
+
+    test "does not affect recent in_progress test runs" do
+      project = ProjectsFixtures.project_fixture()
+      one_hour_ago = NaiveDateTime.add(NaiveDateTime.utc_now(), -1, :hour)
+
+      recent_id = UUIDv7.generate()
+
+      IngestRepo.insert_all(Tests.Test, [
+        %{
+          id: recent_id,
+          project_id: project.id,
+          account_id: project.account.id,
+          duration: 0,
+          status: "in_progress",
+          model_identifier: "",
+          macos_version: "",
+          xcode_version: "",
+          git_branch: "main",
+          git_commit_sha: "",
+          git_ref: "",
+          ran_at: one_hour_ago,
+          is_ci: true,
+          is_flaky: false,
+          shard_plan_id: Ecto.UUID.generate(),
+          inserted_at: one_hour_ago
+        }
+      ])
+
+      :ok = Tests.expire_stale_in_progress_test_runs()
+
+      [run] =
+        IngestRepo.all(from(t in Tests.Test, hints: ["FINAL"], where: t.id == ^recent_id))
+
+      assert run.status == "in_progress"
+    end
+
+    test "does not affect completed test runs" do
+      project = ProjectsFixtures.project_fixture()
+      seven_hours_ago = NaiveDateTime.add(NaiveDateTime.utc_now(), -7, :hour)
+
+      completed_id = UUIDv7.generate()
+
+      IngestRepo.insert_all(Tests.Test, [
+        %{
+          id: completed_id,
+          project_id: project.id,
+          account_id: project.account.id,
+          duration: 5000,
+          status: "success",
+          model_identifier: "",
+          macos_version: "",
+          xcode_version: "",
+          git_branch: "main",
+          git_commit_sha: "",
+          git_ref: "",
+          ran_at: seven_hours_ago,
+          is_ci: true,
+          is_flaky: false,
+          inserted_at: seven_hours_ago
+        }
+      ])
+
+      :ok = Tests.expire_stale_in_progress_test_runs()
+
+      [run] =
+        IngestRepo.all(from(t in Tests.Test, hints: ["FINAL"], where: t.id == ^completed_id))
+
+      assert run.status == "success"
     end
   end
 end

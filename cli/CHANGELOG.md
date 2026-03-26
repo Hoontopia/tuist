@@ -1,6 +1,106 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## What's Changed in 4.168.0<!-- RELEASE NOTES START -->
+
+### ⛰️  Features
+
+* link build runs to shard plans by [@fortmarek](https://github.com/fortmarek) in [#10032](https://github.com/tuist/tuist/pull/10032)
+* resolving SPM Targets with automatic product type using baseProductType by [@Loupehope](https://github.com/Loupehope) in [#9809](https://github.com/tuist/tuist/pull/9809)
+### 🐛 Bug Fixes
+
+* support .tbd stub files in xcframeworks by [@pepicrft](https://github.com/pepicrft) in [#9992](https://github.com/tuist/tuist/pull/9992)
+* add missing macOS platforms to mise.lock by [@fortmarek](https://github.com/fortmarek) in [#10030](https://github.com/tuist/tuist/pull/10030)
+### ⚡ Performance
+
+* use dictionary lookup for target resolution in PackageInfoMapper by [@inju2403](https://github.com/inju2403) in [#10021](https://github.com/tuist/tuist/pull/10021)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.167.0...4.168.0
+
+## What's Changed in 4.167.0<!-- RELEASE NOTES START -->
+
+### ⛰️  Features
+
+* add native shard matrix output for all CI providers by [@fortmarek](https://github.com/fortmarek) in [#10009](https://github.com/tuist/tuist/pull/10009)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.166.2...4.167.0
+
+## What's Changed in 4.166.2<!-- RELEASE NOTES START -->
+
+### 🐛 Bug Fixes
+
+* show suite names in shard log for suite granularity by [@fortmarek](https://github.com/fortmarek) in [#10008](https://github.com/tuist/tuist/pull/10008)
+* use structural action log timing for test run duration reporting by [@fortmarek](https://github.com/fortmarek) in [#10007](https://github.com/tuist/tuist/pull/10007)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.166.0...4.166.2
+
+## What's Changed in 4.166.0<!-- RELEASE NOTES START -->
+
+### ⛰️  Features
+
+* Allow configuring expected signatures for XCFrameworks exposed by Swift packages by [@pepicrft](https://github.com/pepicrft) in [#9914](https://github.com/tuist/tuist/pull/9914)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.165.0...4.166.0
+
+## What's Changed in 4.165.0<!-- RELEASE NOTES START -->
+
+### ⛰️  Features
+
+* run quarantined tests instead of skipping them by [@fortmarek](https://github.com/fortmarek) in [#9978](https://github.com/tuist/tuist/pull/9978)
+### 🐛 Bug Fixes
+
+* remove containsResources special-casing for static frameworks by [@pepicrft](https://github.com/pepicrft) in [#10003](https://github.com/tuist/tuist/pull/10003)
+* sort concurrentMap results in content hashers for determinism by [@fortmarek](https://github.com/fortmarek) in [#9998](https://github.com/tuist/tuist/pull/9998)
+* infer platform destination for shard enumeration from graph by [@fortmarek](https://github.com/fortmarek) in [#9997](https://github.com/tuist/tuist/pull/9997)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.164.1...4.165.0
+
+## What's Changed in 4.164.1<!-- RELEASE NOTES START -->
+
+### 🐛 Bug Fixes
+
+* pass destination to test enumeration for suite sharding by [@fortmarek](https://github.com/fortmarek) in [#9986](https://github.com/tuist/tuist/pull/9986)
+* fix macro copy script failing on clean builds by [@pepicrft](https://github.com/pepicrft) in [#9995](https://github.com/tuist/tuist/pull/9995)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.164.0...4.164.1
+
+## What's Changed in 4.164.0<!-- RELEASE NOTES START -->
+
+### ⛰️  Features
+
+* skip project generation for --without-building with embedded selective testing graph by [@fortmarek](https://github.com/fortmarek) in [#9987](https://github.com/tuist/tuist/pull/9987)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.163.1...4.164.0
+
+## What's Changed in 4.163.1<!-- RELEASE NOTES START -->
+
+### ⛰️  Features
+
+* add test sharding support by [@fortmarek](https://github.com/fortmarek) in [#9796](https://github.com/tuist/tuist/pull/9796)
+### 🐛 Bug Fixes
+
+* support macOS app bundle layout by [@lechuckcaptain](https://github.com/lechuckcaptain) in [#9849](https://github.com/tuist/tuist/pull/9849)
+* always copy macro executable on incremental builds by [@ffittschen](https://github.com/ffittschen) in [#9962](https://github.com/tuist/tuist/pull/9962)
+* fix static framework resource bundle crash when using xcstrings by [@pepicrft](https://github.com/pepicrft) in [#9953](https://github.com/tuist/tuist/pull/9953)
+
+
+
+**Full Changelog**: https://github.com/tuist/tuist/compare/4.162.0...4.163.1
+
 ## What's Changed in 4.162.0<!-- RELEASE NOTES START -->
 
 ### ⛰️  Features
